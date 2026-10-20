@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Predict{% endblock %}
+{% block content %}
+<h1>Predict a house price</h1>
+<p class="sub">Enter the house features and choose a model. Together with the price you get an estimate of how reliable it is.</p>
+
+<div class="predict-layout">
+  <div class="card">
+    <form id="form">
+      <div class="grid">
+        <div><label for="area">Area (sq ft)</label>
+             <input id="area" type="number" min="100" max="100000" value="5000" required></div>
+        <div><label for="bedrooms">Bedrooms</label>
+             <input id="bedrooms" type="number" min="1" max="10" value="3" required></div>
+        <div><label for="bathrooms">Bathrooms</label>
+             <input id="bathrooms" type="number" min="1" max="10" value="2" required></div>
+        <div><label for="stories">Stories</label>
+             <input id="stories" type="number" min="1" max="10" value="2" required></div>
+        <div><label for="parking">Parking spaces</label>
+             <input id="parking" type="number" min="0" max="10" value="1" required></div>
+        <div><label for="furnishingstatus">Furnishing</label>
+             <select id="furnishingstatus">
+               <option value="furnished">Furnished</option>
+               <option value="semi-furnished" selected>Semi-furnished</option>
+               <option value="unfurnished">Unfurnished</option>
+             </select></div>
+        <div><label for="mainroad">Main road</label><select id="mainroad"><option value="yes" selected>Yes</option><option value="no">No</option></select></div>
+        <div><label for="guestroom">Guest room</label><select id="guestroom"><option value="yes">Yes</option><option value="no" selected>No</option></select></div>
+        <div><label for="basement">Basement</label><select id="basement"><option value="yes">Yes</option><option value="no" selected>No</option></select></div>
+        <div><label for="hotwaterheating">Hot water heating</label><select id="hotwaterheating"><option value="yes">Yes</option><option value="no" selected>No</option></select></div>
+        <div><label for="airconditioning">Air conditioning</label><select id="airconditioning"><option value="yes" selected>Yes</option><option value="no">No</option></select></div>
+        <div><label for="prefarea">Preferred area</label><select id="prefarea"><option value="yes">Yes</option><option value="no" selected>No</option></select></div>
+      </div>
+
+      <div style="margin-top:14px">
+        <label for="model">Model</label>
+        <select id="model">
+          <option value="xgboost" selected>XGBoost</option>
+          <option value="random_forest">Random Forest</option>
+        </select>
+      </div>
+      <button id="btn" type="submit">Predict price</button>
+    </form>
+  </div>
+
+  <div class="card" id="result" role="status">
+    <div class="notice">Fill in the form and press <b>Predict price</b>.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const NUMERIC = ["area", "bedrooms", "bathrooms", "stories", "parking"];
+const TEXT = ["mainroad", "guestroom", "basement", "hotwaterheating",
+              "airconditioning", "prefarea", "furnishingstatus", "model"];
+const LABEL = {random_forest: "Random Forest", xgboost: "XGBoost"};
+
+const form = document.getElementById("form");
+const btn = document.getElementById("btn");
+const result = document.getElementById("result");
+const money = Charts.full;
+
+function notice(text, isError) {
+  result.innerHTML = `<div class="notice ${isError ? "err" : ""}">${text}</div>`;
+}
+
+function stat(label, value, hint) {
+  return `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div>` +
+         (hint ? `<div class="hint">${hint}</div>` : "") + `</div>`;
+}
+
+function render(d) {
+  let html = `<div class="small">Predicted price (${LABEL[d.model]})</div>
+              <div class="price">${money(d.predicted_price)}</div>`;
+
+  if (d.interval) {
+    const i80 = d.interval["80"], i90 = d.interval["90"];
+    html += `<div class="range-text">80% prediction interval: <b>${money(i80[0])} &ndash; ${money(i80[1])}</b></div>
+             <div id="rangebar"></div>
+             <div class="stats">` +
+      stat("Model quality (R&sup2;)", d.quality.cv_r2.toFixed(3), "cross-validation, 1.0 = perfect") +
+      stat("Typical error (MAE)", "&plusmn; " + money(d.quality.cv_mae), "average miss in cross-validation") +
+      stat("90% interval", `${Charts.compact(i90[0])} &ndash; ${Charts.compact(i90[1])}`, "wider range, more certain") +
+      stat("Price rank", d.percentile.toFixed(0) + "%", "of houses in the dataset are cheaper") +
+      `</div>`;
+  }
+
+  if (d.comparison) {
+    html += `<h3>What each model says</h3><div class="table-wrap"><table>
+      <tr><th>Model</th><th class="num">Predicted price</th></tr>
+      <tr><td>Random Forest</td><td class="num">${money(d.comparison.random_forest)}</td></tr>
+      <tr><td>XGBoost</td><td class="num">${money(d.comparison.xgboost)}</td></tr>
+      <tr><td><b>Difference</b></td><td class="num"><b>${d.model_difference_pct}%</b></td></tr></table></div>
+      <div class="small">${d.model_difference_pct < 5
+        ? "The models agree closely, which is a good sign."
+        : "The models disagree noticeably, so treat this estimate with extra care."}</div>`;
+  }
+
+  html += d.interval
+    ? `<div class="explain">The interval is built from the model's real errors in cross-validation: about 80% of the
+       time the true price fell inside a range like this one. It is an estimate, not a guarantee. The dataset is small
+       (545 houses), so unusual houses can be predicted less accurately.</div>`
+    : `<div class="notice" style="margin-top:14px">Statistics are not available yet. Run <code>python -m src.train</code>
+       to generate them.</div>`;
+
+  result.innerHTML = html;
+  if (d.interval) {
+    Charts.rangeBar(document.getElementById("rangebar"), {
+      min: d.dataset_price.min, max: d.dataset_price.max,
+      lo: d.interval["80"][0], hi: d.interval["80"][1], value: d.predicted_price,
+    });
+  }
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {};
+  NUMERIC.forEach((id) => payload[id] = Number(document.getElementById(id).value));
+  TEXT.forEach((id) => payload[id] = document.getElementById(id).value);
+
+  btn.disabled = true;
+  try {
+    const res = await fetch("/predict", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) render(data);
+    else if (data.errors) notice("Please fix:<ul class='errors'>" + data.errors.map((x) => `<li>${Charts.esc(x)}</li>`).join("") + "</ul>", true);
+    else notice(Charts.esc(data.error || "Something went wrong."), true);
+  } catch (err) {
+    notice("Could not reach the server.", true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+{% endblock %}

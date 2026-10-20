@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Model evaluation{% endblock %}
+{% block content %}
+<h1>Model evaluation</h1>
+<p class="sub">How well Random Forest and XGBoost predict the price of houses they have not seen before.</p>
+
+<div class="card notice" id="status">Loading...</div>
+
+<div id="content" hidden>
+  <div class="card">
+    <h2>Summary</h2>
+    <p id="summary"></p>
+    <p class="small" id="meta"></p>
+  </div>
+
+  <div class="card">
+    <h2>Metrics</h2>
+    <div class="table-wrap"><table id="metrics"></table></div>
+    <details>
+      <summary>How to read these numbers</summary>
+      <ul>
+        <li><b>R&sup2;</b> &ndash; the share of price differences the model explains. 1.0 is perfect, 0 means no better than always guessing the average price.</li>
+        <li><b>MAE</b> &ndash; the average size of the error, in price units. Lower is better.</li>
+        <li><b>RMSE</b> &ndash; like MAE, but big mistakes count more.</li>
+        <li><b>MAPE</b> &ndash; the average error as a percentage of the real price.</li>
+        <li><b>Test split</b> &ndash; one 80/20 split, evaluated on only a small group of houses, so the numbers are a bit noisy.</li>
+        <li><b>Cross-validation (CV)</b> &ndash; the data is split 5 ways and repeated 3 times, and the scores are averaged. It is more stable, so use it to compare models. The &plusmn; value shows how much the score changes between splits.</li>
+        <li><b>Green</b> marks the better model in each row.</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="cols2" id="models"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LABEL = {random_forest: "Random Forest", xgboost: "XGBoost"};
+const money = Charts.full;
+
+const ROWS = [
+  ["Test R&sup2;",          (m) => m.test.r2,        (v) => v.toFixed(3), true],
+  ["Test MAE",              (m) => m.test.mae,       money,               false],
+  ["Test RMSE",             (m) => m.test.rmse,      money,               false],
+  ["Test MAPE",             (m) => m.test.mape,      (v) => v.toFixed(1) + "%", false],
+  ["CV R&sup2; (mean &plusmn; std)", (m) => m.cv.r2_mean, (v, m) => v.toFixed(3) + " &plusmn; " + m.cv.r2_std.toFixed(3), true],
+  ["CV MAE",                (m) => m.cv.mae_mean,    money,               false],
+  ["CV RMSE",               (m) => m.cv.rmse_mean,   money,               false],
+];
+
+function metricsTable(models, names) {
+  let html = `<tr><th>Metric</th>${names.map((n) => `<th class="num">${LABEL[n]}</th>`).join("")}</tr>`;
+  ROWS.forEach(([label, get, fmt, higherBetter]) => {
+    const vals = names.map((n) => get(models[n]));
+    const best = higherBetter ? Math.max(...vals) : Math.min(...vals);
+    html += `<tr><td>${label}</td>` + names.map((n, i) =>
+      `<td class="num ${vals[i] === best ? "best" : ""}">${fmt(vals[i], models[n])}</td>`).join("") + `</tr>`;
+  });
+  return html;
+}
+
+function summaryText(models) {
+  const [a, b] = ["random_forest", "xgboost"].filter((n) => models[n]);
+  if (!b) return "";
+  const ma = models[a], mb = models[b];
+  const diff = mb.cv.r2_mean - ma.cv.r2_mean;
+  const better = diff >= 0 ? b : a, worse = diff >= 0 ? a : b;
+  const noise = Math.max(ma.cv.r2_std, mb.cv.r2_std);
+  const verdict = Math.abs(diff) < noise
+    ? "This gap is smaller than the variation between splits (&plusmn;" + noise.toFixed(3) + "), so the two models perform about the same."
+    : "This gap is larger than the variation between splits (&plusmn;" + noise.toFixed(3) + "), so the difference is likely real.";
+  const lo = Math.round(Math.min(ma.cv.r2_mean, mb.cv.r2_mean) * 100);
+  const hi = Math.round(Math.max(ma.cv.r2_mean, mb.cv.r2_mean) * 100);
+  const share = lo === hi ? lo + "%" : lo + "&ndash;" + hi + "%";
+  const adverb = Math.abs(diff) < noise ? "slightly " : "";
+  return `In cross-validation <b>${LABEL[better]}</b> scores ${adverb}higher than ${LABEL[worse]}
+          (R&sup2; ${models[better].cv.r2_mean.toFixed(3)} vs ${models[worse].cv.r2_mean.toFixed(3)}). ${verdict}
+          Both explain roughly ${share} of the price differences. With only a few hundred houses, this is close to
+          the limit of what these features can explain.`;
+}
+
+function modelCard(name, m) {
+  const params = Object.entries(m.params).map(([k, v]) => `<tr><td><code>${Charts.esc(k)}</code></td><td class="num">${Charts.esc(v)}</td></tr>`).join("");
+  return `<section class="card">
+    <h2>${LABEL[name]}</h2>
+    <h3>Actual vs predicted price (test houses)</h3>
+    <div class="small">Dots on the dashed line are perfect predictions.</div>
+    <div id="sc-${name}"></div>
+    <h3>Prediction errors (actual &minus; predicted)</h3>
+    <div class="small">Should be centred on 0. Wide spread means large errors.</div>
+    <div id="rs-${name}"></div>
+    <h3>Which features matter most (permutation importance)</h3>
+    <div class="small">How much R&sup2; drops when a feature is shuffled. Bars show &plusmn; 1 std over 20 repeats.</div>
+    <div id="im-${name}"></div>
+    <h3>${m.tuned ? "Tuned hyperparameters" : "Hyperparameters"}</h3>
+    <div class="table-wrap"><table>${params}</table></div>
+  </section>`;
+}
+
+(async () => {
+  const status = document.getElementById("status");
+  try {
+    const report = await Charts.loadReport();
+    const models = report.models;
+    const names = ["random_forest", "xgboost"].filter((n) => models[n]);
+
+    document.getElementById("summary").innerHTML = summaryText(models);
+    const mt = report.meta;
+    document.getElementById("meta").textContent =
+      `Training houses: ${mt.train_rows}, test houses: ${mt.test_rows}. Report generated ${mt.generated.replace("T", " ")}.`;
+    document.getElementById("metrics").innerHTML = metricsTable(models, names);
+    document.getElementById("models").innerHTML = names.map((n) => modelCard(n, models[n])).join("");
+
+    names.forEach((n) => {
+      const m = models[n];
+      Charts.scatter(document.getElementById("sc-" + n), m.scatter, {xLabel: "Actual price", yLabel: "Predicted price", title: LABEL[n] + " actual vs predicted"});
+      Charts.histogram(document.getElementById("rs-" + n), m.residual_hist.edges, m.residual_hist.counts, {xLabel: "Error (price units)", title: LABEL[n] + " errors"});
+      Charts.hbar(document.getElementById("im-" + n),
+        m.importance.map((i) => ({label: i.feature, value: i.mean, err: i.std})), {title: LABEL[n] + " feature importance"});
+    });
+    status.hidden = true;
+    document.getElementById("content").hidden = false;
+  } catch (err) {
+    status.classList.add("err");
+    status.innerHTML = Charts.esc(err.message);
+  }
+})();
+</script>
+{% endblock %}

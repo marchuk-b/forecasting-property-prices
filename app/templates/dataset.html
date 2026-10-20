@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Dataset{% endblock %}
+{% block content %}
+<h1>About the dataset</h1>
+<p class="sub">The data used to train and test the models: <code>Housing.csv</code>.</p>
+
+<div class="card notice" id="status">Loading...</div>
+
+<div id="content" hidden>
+  <div class="card">
+    <h2>Overview</h2>
+    <p id="about"></p>
+    <div class="stats" id="overview"></div>
+  </div>
+
+  <div class="card">
+    <h2>Features</h2>
+    <div class="table-wrap"><table id="features"></table></div>
+  </div>
+
+  <div class="cols2">
+    <section class="card">
+      <h2>Price distribution</h2>
+      <div class="small">Most houses are in the lower-middle range; a few are much more expensive (the distribution is skewed to the right).</div>
+      <div id="hist"></div>
+    </section>
+    <section class="card">
+      <h2>Correlation with price</h2>
+      <div class="small">Pearson correlation of each numeric feature with price (&minus;1 to 1). Higher means price tends to grow with the feature.</div>
+      <div id="corr"></div>
+    </section>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <h2>Median price by category</h2>
+    <div class="small">Houses with a feature (&ldquo;yes&rdquo;) are usually more expensive. Some groups are small, so compare with care.</div>
+    <div class="table-wrap"><table id="groups"></table></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const money = Charts.full;
+const esc = Charts.esc;
+
+function summaryCell(col) {
+  if (col.summary) {
+    const s = col.summary;
+    const f = (v) => Number.isInteger(v) ? v : (Math.abs(v) >= 100 ? money(v) : v.toFixed(2));
+    return `min ${money(s.min)} &middot; median ${f(s.median)} &middot; mean ${f(s.mean)} &middot; max ${money(s.max)}`;
+  }
+  return col.values.map((v) => `${esc(v.value)}: ${v.count}`).join(" &middot; ");
+}
+
+(async () => {
+  const status = document.getElementById("status");
+  try {
+    const report = await Charts.loadReport();
+    const d = report.dataset, p = d.price;
+
+    document.getElementById("about").innerHTML =
+      `Each row describes one house: its size, rooms, amenities and sale price. The models learn the link between the
+       ${d.n_features} features and the <b>price</b>. The data has no missing values and no duplicate rows.`;
+
+    const tile = (l, v, h) => `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div>${h ? `<div class="hint">${h}</div>` : ""}</div>`;
+    document.getElementById("overview").innerHTML =
+      tile("Houses", d.rows) + tile("Features", d.n_features) +
+      tile("Missing values", d.missing) + tile("Duplicate rows", d.duplicates) +
+      tile("Lowest price", Charts.compact(p.min)) + tile("Median price", Charts.compact(p.median)) +
+      tile("Highest price", Charts.compact(p.max)) + tile("Average price", Charts.compact(p.mean), "std " + Charts.compact(p.std));
+
+    document.getElementById("features").innerHTML =
+      `<tr><th>Column</th><th>Type</th><th>Meaning</th><th>Values</th></tr>` +
+      d.columns.map((c) => `<tr><td><code>${esc(c.name)}</code></td><td>${esc(c.kind)}</td><td>${esc(c.description)}</td><td>${summaryCell(c)}</td></tr>`).join("");
+
+    Charts.histogram(document.getElementById("hist"), d.price_hist.edges, d.price_hist.counts, {xLabel: "Price", title: "Price distribution"});
+    Charts.hbar(document.getElementById("corr"),
+      Object.entries(d.correlations).map(([k, v]) => ({label: k, value: v})).sort((a, b) => b.value - a.value), {labelW: 90, title: "Correlation with price"});
+
+    document.getElementById("groups").innerHTML =
+      `<tr><th>Feature</th><th>Value</th><th class="num">Houses</th><th class="num">Median price</th></tr>` +
+      d.columns.filter((c) => c.values).map((c) => c.values.map((v, i) =>
+        `<tr><td>${i === 0 ? `<code>${esc(c.name)}</code>` : ""}</td><td>${esc(v.value)}</td><td class="num">${v.count}</td><td class="num">${money(v.median_price)}</td></tr>`
+      ).join("")).join("");
+
+    status.hidden = true;
+    document.getElementById("content").hidden = false;
+  } catch (err) {
+    status.classList.add("err");
+    status.innerHTML = esc(err.message);
+  }
+})();
+</script>
+{% endblock %}

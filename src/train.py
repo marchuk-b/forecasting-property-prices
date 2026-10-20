@@ -49,6 +49,10 @@ def main():
     best = max(results, key=lambda n: results[n]["r2"])
     print(f"\nBest model by R2: {best}")
 
+    print("\nBuilding statistics report for the web app (takes a few seconds)...")
+    from src.report import build_report
+    build_report()
+
 
 if __name__ == "__main__":
     main()

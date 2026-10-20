@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} - House Price Prediction</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <span class="brand">House Price Prediction</span>
+    <nav>
+      <a href="/" class="{{ 'active' if page == 'predict' else '' }}">Predict</a>
+      <a href="/models" class="{{ 'active' if page == 'models' else '' }}">Model evaluation</a>
+      <a href="/dataset" class="{{ 'active' if page == 'dataset' else '' }}">Dataset</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+{% block content %}{% endblock %}
+</main>
+<script src="{{ url_for('static', filename='charts.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
