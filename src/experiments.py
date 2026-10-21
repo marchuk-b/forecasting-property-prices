@@ -1,10 +1,10 @@
-"""Compare modelling variants with repeated 5-fold CV on the whole dataset.
+"""Compare modelling variants with repeated 5-fold CV on the training dataset.
 Run: python -m src.experiments
 """
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import RepeatedKFold, cross_validate
+from sklearn.model_selection import RepeatedKFold, cross_validate, train_test_split
 
 from src.config import ALL_FEATURES, RANDOM_STATE, TARGET
 from src.data_preprocessing import load_data
@@ -37,13 +37,18 @@ VARIANTS = {
 def main():
     df = load_data()
     X, y = df[ALL_FEATURES], df[TARGET]
+    
+    # ВИПРАВЛЕННЯ: Відділяємо тестову вибірку (20%), щоб уникнути витоку даних
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE)
+    
     cv = RepeatedKFold(n_splits=5, n_repeats=3, random_state=RANDOM_STATE)
     scoring = {"r2": "r2", "mae": "neg_mean_absolute_error"}
 
     rows = []
     for mname, model in get_models().items():
         for vname, flags in VARIANTS.items():
-            res = cross_validate(build_pipeline(model, **flags), X, y, cv=cv, scoring=scoring)
+            # ВИПРАВЛЕННЯ: Передаємо у крос-валідацію лише X_train та y_train
+            res = cross_validate(build_pipeline(model, **flags), X_train, y_train, cv=cv, scoring=scoring)
             rows.append({
                 "model": mname, "variant": vname,
                 "r2": res["test_r2"].mean(), "r2_std": res["test_r2"].std(),

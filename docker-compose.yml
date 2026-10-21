@@ -1,0 +1,36 @@
+# Start everything:   docker compose up --build
+# Then open:          http://localhost:5000
+services:
+  # One-shot job: trains both models and builds the statistics report.
+  # Skipped automatically when the models already exist in the volume.
+  train:
+    build: .
+    image: house-price-app
+    command:
+      - sh
+      - -c
+      - >
+        if [ -f models/random_forest.joblib ] && [ -f models/xgboost.joblib ] && [ -f models/report.json ];
+        then echo "Models already trained - skipping (to retrain: docker compose run --rm train python -m src.train)";
+        else python -m src.train;
+        fi
+    volumes:
+      - models:/app/models
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  # The Flask app served by gunicorn. Starts only after training finished successfully.
+  web:
+    image: house-price-app
+    depends_on:
+      train:
+        condition: service_completed_successfully
+    ports:
+      - "5000:5000"
+    volumes:
+      - models:/app/models
+    restart: unless-stopped
+
+volumes:
+  models:

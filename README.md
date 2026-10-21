@@ -1,47 +1,119 @@
-# House Price Prediction
+# Прогнозування цін на житло
 
-Predicting house prices from `Housing.csv` (545 houses, 12 features) with **Random Forest** and **XGBoost**, served through a **Flask** API with a simple web form.
+Прогнозування цін на житло за даними `Housing.csv` (545 будинків, 12 ознак) за допомогою **Random Forest** і **XGBoost**. Застосунок надає API на **Flask** і вебсайт із трьома сторінками: прогнозування ціни зі статистикою, оцінювання моделей та інформація про набір даних.
 
-## Project structure
+## Структура проєкту
 
 ```
-data/raw/Housing.csv         original dataset
-notebooks/eda.ipynb       exploratory data analysis
-notebooks/model_evaluation.ipynb   metrics, residuals, feature importance
-src/config.py                paths, seed, feature lists, modelling switches
-src/data_preprocessing.py    loading, train/test split, encoding
-src/features.py              optional engineered features
-src/pipeline.py              builds the full sklearn pipeline
-src/experiments.py           CV comparison of modelling variants
-src/tune.py                  hyperparameter search -> models/best_params.json
-src/train.py                 trains both models, saves them to models/
-src/evaluate.py              MAE, RMSE, R2
-src/predict.py               loads a saved model and predicts
-app/main.py                  Flask app (/, /predict, /health)
-app/schemas.py               input validation
-app/templates/index.html     web form
-tests/test_predict.py        tests
+forecasting-property-prices/
+├── app/                              # Вебзастосунок і API на Flask
+│   ├── main.py                       # Сторінки, перевірка стану, звіт і прогнозування
+│   ├── schemas.py                    # Перевірка вхідних запитів
+│   ├── static/
+│   │   ├── charts.js                 # Легковагова бібліотека SVG-графіків
+│   │   └── style.css
+│   └── templates/
+│       ├── base.html
+│       ├── dataset.html
+│       ├── index.html                # Форма прогнозування
+│       └── models.html               # Оцінювання моделей
+├── data/
+│   └── raw/
+│       └── Housing.csv              # Вихідний набір даних
+├── models/
+│   ├── best_params.json              # Оптимізовані гіперпараметри
+│   ├── random_forest.joblib          # Навчена модель
+│   ├── report.json                   # Статистика набору даних і оцінювання
+│   └── xgboost.joblib                # Навчена модель
+├── notebooks/
+│   ├── eda.ipynb                     # Розвідувальний аналіз даних
+│   └── model_evaluation.ipynb        # Метрики, залишки та важливість ознак
+├── src/                              # Обробка даних і машинне навчання
+│   ├── config.py                     # Шляхи, ознаки та параметри моделей
+│   ├── data_preprocessing.py         # Завантаження, поділ і кодування даних
+│   ├── evaluate.py                   # MAE, RMSE та R²
+│   ├── experiments.py                # Експерименти з крос-валідацією
+│   ├── features.py                   # Додаткові інженерні ознаки
+│   ├── pipeline.py                   # Конвеєр scikit-learn
+│   ├── predict.py                    # Завантаження моделі та прогнозування
+│   ├── report.py                     # Формування звіту для вебзастосунку
+│   ├── train.py                      # Навчання та збереження обох моделей
+│   └── tune.py                       # Пошук гіперпараметрів
+├── tests/
+│   └── test_predict.py               # Тести API та прогнозування
+├── .dockerignore
+├── Dockerfile                        # Образ Python із Gunicorn
+├── docker-compose.yml                # Сервіси навчання та вебзастосунку
+├── README.md
+├── requirements-docker.txt           # Залежності контейнера
+└── requirements.txt                  # Залежності для розробки
 ```
 
-## How to run
+## Запуск
 
 ```bash
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-python -m src.experiments         # (optional) compare modelling variants
-python -m src.tune                # (optional) tune hyperparameters
-python -m src.train               # train and save both models
-python -m app.main                # start the app: http://127.0.0.1:5000
-pytest                            # run tests (needs trained models for predict tests)
+python -m src.experiments         # (необов'язково) порівняти варіанти моделей
+python -m src.tune                # (необов'язково) оптимізувати гіперпараметри
+python -m src.train               # навчити й зберегти моделі та сформувати звіт
+python -m app.main                # запустити застосунок: http://127.0.0.1:5000
+pytest                            # запустити тести (для тестів прогнозування потрібні навчені моделі)
 ```
 
-Run all commands from the project root and use `python -m ...` so the `src` imports work.
+Запускайте команди з кореневої папки проєкту. Використовуйте `python -m ...`, щоб коректно працювали імпорти з `src`.
+
+## Запуск у Docker
+
+Потрібен Docker із Compose (Docker Desktop у Windows або macOS). Інше встановлювати не потрібно.
+
+```bash
+docker compose up --build
+```
+
+Відкрийте http://localhost:5000. Під час запуску:
+
+1. Збирається образ на Python 3.12 і встановлюються залежності з `requirements-docker.txt`.
+2. Сервіс **`train`** навчає обидві моделі та формує звіт зі статистикою. Надалі цей крок пропускається, якщо результати вже збережені у томі `models`.
+3. Після успішного завершення навчання запускається сервіс **`web`** — Flask за Gunicorn.
+
+Корисні команди:
+
+```bash
+docker compose up -d --build                          # запустити у фоновому режимі
+docker compose logs -f web                            # переглядати журнал вебсервісу
+docker compose run --rm train python -m src.tune      # оптимізувати гіперпараметри й зберегти їх у томі
+docker compose run --rm train python -m src.train     # повторно навчити моделі з поточними параметрами
+docker compose restart web                            # перезапустити застосунок із новими моделями
+docker compose run --rm web pytest                    # запустити тести в контейнері
+docker compose down                                   # зупинити сервіси, зберігши моделі
+docker compose down -v                                # зупинити сервіси й видалити том із моделями
+```
+
+Примітки:
+- Навчені моделі створюються *всередині Docker* і не копіюються з комп'ютера: модель, збережена іншою версією scikit-learn або XGBoost, може не завантажитися. Файл `models/best_params.json` (якщо його створено локально через `src.tune`) копіюється в образ і використовується під час навчання.
+- Після змін у коді повторно виконайте `docker compose up --build`. Якщо змінили параметри моделей і хочете навчити їх заново, видаліть том командою `docker compose down -v`.
+- Для повністю відтворюваної збірки зафіксуйте точні версії пакетів у `requirements-docker.txt` (див. примітку на початку файла).
+
+## Сторінки вебзастосунку
+
+| URL        | Вміст |
+|------------|---------------|
+| `/`        | Форма прогнозування ціни. Окрім прогнозу, показує **80% та 90% інтервали прогнозу**, якість моделі (R² і типову похибку за крос-валідацією), **позицію ціни** серед будинків у наборі та прогнози обох моделей. |
+| `/models`  | **Оцінювання моделей:** таблиця метрик для тестової вибірки та крос-валідації, графіки фактичних і прогнозованих цін, гістограми похибок, важливість ознак методом перестановок і гіперпараметри. |
+| `/dataset` | **Інформація про дані:** розмір набору, пропуски, розподіл цін, опис і статистики стовпців, кореляція з ціною та медіанні ціни за категоріями. |
+
+Уся статистика завантажується з `models/report.json`. Цей файл створюється командою `python -m src.train` (або `python -m src.report`). Якщо звіту ще немає, сторінки покажуть підказку замість статистичних даних.
+
+### Як обчислюються інтервали прогнозу
+
+Під час крос-валідації кожен будинок прогнозує модель, яка не навчалася на цьому прикладі. Похибки обчислюються як частка від прогнозованої ціни. До нового прогнозу застосовуються 10-й і 90-й перцентилі похибок (80% інтервал) або 5-й і 95-й перцентилі (90% інтервал). Отже, 80% інтервал означає, що під час крос-валідації приблизно 80% фактичних цін потрапили в аналогічний діапазон. Це емпірична оцінка, а не гарантія.
 
 ## API
 
-`POST /predict` with JSON (field `model` is optional: `xgboost` by default, or `random_forest`):
+Надішліть JSON-запит на `POST /predict`. Поле `model` необов'язкове: за замовчуванням використовується `xgboost`; також доступна модель `random_forest`.
 
 ```bash
 curl -X POST http://127.0.0.1:5000/predict -H "Content-Type: application/json" -d '{
@@ -52,20 +124,21 @@ curl -X POST http://127.0.0.1:5000/predict -H "Content-Type: application/json" -
 }'
 ```
 
-Response: `{"model": "xgboost", "predicted_price": 8123456}`. Invalid input returns `400` with a list of errors; if the models have not been trained yet, `503`.
+Приклад скороченої відповіді: `{"model": "xgboost", "predicted_price": 8123456, "interval": {"80": [lo, hi], "90": [lo, hi]}, "quality": {...}, "percentile": 63.2, "comparison": {...}}`. Статистичні поля додаються лише за наявності `models/report.json`. Для некоректного запиту повертається код `400` зі списком помилок; якщо моделі ще не навчені — `503`. Запит `GET /api/report` повертає повний звіт у форматі JSON.
 
-## Results
+## Результати
 
-Test split (80/20, 109 houses), tuned models:
+Результати оптимізованих моделей на тестовій вибірці (поділ 80/20, 109 будинків):
 
-| Model         | MAE       | RMSE      | R2    |
+| Модель        | MAE       | RMSE      | R²    |
 |---------------|-----------|-----------|-------|
 | Random Forest | 1,030,952 | 1,409,622 | 0.607 |
 | XGBoost       |   965,819 | 1,333,776 | 0.648 |
 
-Cross-validation on the train split during tuning gave R2 = 0.643 (Random Forest) and 0.646 (XGBoost), so the two models perform similarly.
+Крос-валідація на тренувальній вибірці під час оптимізації дала R² = 0.643 для Random Forest і 0.646 для XGBoost. Отже, результати моделей близькі.
 
-Findings:
-- Engineered features (`total_rooms`, `area_per_room`) and a log-transformed target did not improve either model (differences were within CV noise), so they are switched off in `src/config.py`.
-- Hyperparameter tuning gave a small improvement (about +0.01 R2 in CV).
-- R2 around 0.65 appears to be the limit for this small dataset.
+Висновки:
+- Інженерні ознаки (`total_rooms`, `area_per_room`) і логарифмування цільової змінної не покращили результати моделей (різниця була в межах варіації крос-валідації), тому їх вимкнено в `src/config.py`.
+- Оптимізація гіперпараметрів дала невелике покращення (приблизно +0.01 до R² за крос-валідацією).
+- Для цього невеликого набору даних значення R² близько 0.65, схоже, є практичною межею точності.
+  
